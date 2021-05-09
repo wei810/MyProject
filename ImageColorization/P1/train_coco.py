@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import pickle
-from data import Data
+from data_wrapper import Data
 from functools import partial
 from models import *
 from torchinfo import summary
@@ -42,7 +42,7 @@ def main():
     SUMMARY_WRITER_PATH = args.summary_writer_path
     STATE_DICT_PATH = args.state_dict_path
     FILE_DICT_PATH = '../coco_fileDict.p'
-    DEVICE = ['cuda:0', 'cuda:1']
+    DEVICE = ['cpu', 'cpu']
     with open(FILE_DICT_PATH, 'rb') as f:
         fileDict = pickle.load(f)
     gen = nn.DataParallel(Unet(UnetEncoder, UnetDecoder), DEVICE, DEVICE[0])
