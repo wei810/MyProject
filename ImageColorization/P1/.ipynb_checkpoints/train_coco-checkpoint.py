@@ -24,13 +24,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('summary_writer_path', type=str)
     parser.add_argument('state_dict_path', type=str)
-    parser.add_argument('--epoch', default=50, type=int)
+    parser.add_argument('--epoch', default=30, type=int)
     parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--size', default=128, type=int)
     parser.add_argument('--tensorboard_freq', default=200, type=int)
     parser.add_argument('--generator_lr', default=0.0002, type=float)
     parser.add_argument('--critic_lr', default=0.0002, type=float)
-    parser.add_argument('--l1_constant', default=10., type=float)
+    parser.add_argument('--l1_constant', default=100., type=float)
     args = parser.parse_args()
     EPOCH = args.epoch
     BATCH_SIZE = args.batch_size
@@ -42,7 +42,7 @@ def main():
     SUMMARY_WRITER_PATH = args.summary_writer_path
     STATE_DICT_PATH = args.state_dict_path
     FILE_DICT_PATH = '../coco_fileDict.p'
-    DEVICE = ['cpu', 'cpu']
+    DEVICE = ['cuda:0', 'cuda:0']
     with open(FILE_DICT_PATH, 'rb') as f:
         fileDict = pickle.load(f)
     gen = nn.DataParallel(Unet(UnetEncoder, UnetDecoder), DEVICE, DEVICE[0])
@@ -142,7 +142,9 @@ def main():
                 print(f'--{x}: {round(engine.state.metrics[x], 4)}')
         if engine.state.iteration % 500 == 0:
             state_dict = {'gen': gen.state_dict(), 'critic': critic.state_dict()}
-            torch.save(state_dict, STATE_DICT_PATH)
+            i = STATE_DICT_PATH.find('.pt')
+            path = STATE_DICT_PATH[:i] + f'_{engine.state.iteration}_.pt'
+            torch.save(state_dict, path)
         if engine.state.iteration % TENSORBOARD_FREQ == 0:
             gen.eval()
             print('Logging images to Tensorboard ...')
