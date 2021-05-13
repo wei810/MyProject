@@ -140,7 +140,7 @@ def main():
             print(f'<iteration: {engine.state.iteration}>')
             for x in names:
                 print(f'--{x}: {round(engine.state.metrics[x], 4)}')
-        if engine.state.iteration % 500 == 0:
+        if engine.state.iteration % 10000 == 0:
             state_dict = {'gen': gen.state_dict(), 'critic': critic.state_dict()}
             i = STATE_DICT_PATH.find('.pt')
             path = STATE_DICT_PATH[:i] + f'_{engine.state.iteration}_.pt'
