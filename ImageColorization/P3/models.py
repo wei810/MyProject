@@ -321,7 +321,7 @@ class Unet(nn.Module):
         
         self.args = {
             'inplane_base': 64,
-            'encoder_block': BasicBlock,
+            'encoder_block': ResidualBasicBlock,
             'encoder_layers': [8, 4, 4, 2],
             'encoder_norm_layer': nn.BatchNorm2d,
             'encoder_activation_function': custom_leaky_relu(rate=0.15),
