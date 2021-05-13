@@ -1,3 +1,4 @@
 ImageColorization/data/*
 ImageColorization/P1/summary_writers/*
 ImageColorization/P1/state_dicts/*
+.ipynb_checkpoints
