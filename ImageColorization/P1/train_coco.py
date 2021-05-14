@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--critic_lr', default=0.0002, type=float)
     parser.add_argument('--l1_constant', default=100., type=float)
     args = parser.parse_args()
+    print(args)
     EPOCH = args.epoch
     BATCH_SIZE = args.batch_size
     SIZE = (args.size, args.size)
