@@ -24,8 +24,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('summary_writer_path', type=str)
     parser.add_argument('state_dict_path', type=str)
-    parser.add_argument('--epoch', default=30, type=int)
-    parser.add_argument('--batch_size', default=8, type=int)
+    parser.add_argument('--epoch', default=25, type=int)
+    parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--size', default=128, type=int)
     parser.add_argument('--tensorboard_freq', default=200, type=int)
     parser.add_argument('--generator_lr', default=0.0002, type=float)
@@ -42,17 +42,17 @@ def main():
     SUMMARY_WRITER_PATH = args.summary_writer_path
     STATE_DICT_PATH = args.state_dict_path
     FILE_DICT_PATH = '../coco_fileDict.p'
-    DEVICE = ['cuda:0', 'cuda:0']
+    DEVICE = 'cuda:0'
     with open(FILE_DICT_PATH, 'rb') as f:
         fileDict = pickle.load(f)
-    gen = nn.DataParallel(Unet(UnetEncoder, UnetDecoder), DEVICE, DEVICE[0])
-    gen.to(DEVICE[0])
-    critic = PatchCritic(ResidualLayer, [1, 1, 1, 1], custom_leaky_relu(rate=0.3), nn.BatchNorm2d)
-    critic.to(DEVICE[1])
+    gen = Unet(UnetEncoder, UnetDecoder)
     print('GENERATOR ARCHITECTURE')
     summary(gen)
+    gen.to(DEVICE)
+    critic = PatchCritic(ResidualLayer, [1, 1, 1, 1], custom_leaky_relu(rate=0.3), nn.BatchNorm2d)
     print('CRITIC ARCHITECTURE')
     summary(critic)
+    critic.to(DEVICE)
     opts = {
         'gen': optim.Adam(gen.parameters(), lr=GENERATOR_LR),
         'critic': optim.Adam(critic.parameters(), lr=CRITIC_LR)
@@ -63,21 +63,19 @@ def main():
     valDL = DataLoader(valDS, batch_size=BATCH_SIZE)
     criterionL1 = nn.L1Loss()
     criterionMSE = nn.MSELoss()
-    criterionGAN = GANLoss(label_smoothing=0.95)
+    criterionGAN = GANLoss(label_smoothing=0.95, device=DEVICE)
     logging_freq = 30
     def train_step(engine, batch):
         gen.train()
         critic.train()
         opts['gen'].zero_grad()
         opts['critic'].zero_grad()
-        x, real = batch['bw'], batch['rgb']
-        fake = gen(x.to(DEVICE[0])).cpu()
-        noise_shape = list(x.shape)
-        noise_shape[1] = noise_shape[1] * 2
+        x, real = batch['bw'].to(DEVICE), batch['rgb'].to(DEVICE)
+        fake = gen(x)
         fake_critic_input = torch.cat([x, fake], dim=1).detach()
-        fake_outs = critic(fake_critic_input.to(DEVICE[1])).cpu()
+        fake_outs = critic(fake_critic_input)
         real_critic_input = torch.cat([x, real], dim=1).detach()
-        real_outs = critic(real_critic_input.to(DEVICE[1])).cpu()
+        real_outs = critic(real_critic_input)
         d_loss = criterionGAN(fake_outs, False)*0.5 + criterionGAN(real_outs, True)*0.5
         # critic step
         d_loss.backward()
@@ -86,7 +84,7 @@ def main():
         psnr = 10*torch.log10(4 / criterionMSE(fake, real))
         critic.eval()
         fake_critic_input = torch.cat([x, fake], dim=1)
-        fake_outs = critic(fake_critic_input.to(DEVICE[1])).cpu()
+        fake_outs = critic(fake_critic_input)
         l1_loss = criterionL1(fake, real)
         # generator steps
         gan_loss = criterionGAN(fake_outs, True)
@@ -110,14 +108,12 @@ def main():
     ProgressBar().attach(trainEngine)
     def val_step(engine, batch):
         with torch.no_grad():
-            x, real = batch['bw'], batch['rgb']
-            fake = gen(x.to(DEVICE[0])).detach().cpu()
-            noise_shape = list(x.shape)
-            noise_shape[1] = noise_shape[1] * 2
+            x, real = batch['bw'].to(DEVICE), batch['rgb'].to(DEVICE)
+            fake = gen(x).detach()
             fake_critic_input = torch.cat([x, fake], dim=1).detach()
-            fake_outs = critic(fake_critic_input.to(DEVICE[1])).cpu().detach()
+            fake_outs = critic(fake_critic_input).detach()
             real_critic_input = torch.cat([x, real], dim=1).detach()
-            real_outs = critic(real_critic_input.to(DEVICE[1])).cpu().detach()
+            real_outs = critic(real_critic_input).detach()
             d_loss = criterionGAN(fake_outs, False)*0.5 + criterionGAN(real_outs, True)*0.5
             l1_loss = criterionL1(fake, real)
             gan_loss = criterionGAN(fake_outs, True)
@@ -160,8 +156,8 @@ def main():
             for phase in ['Train', 'Val']:
                 for d in dl[phase]:
                     with torch.no_grad():
-                        x, real = d['bw'], d['rgb']
-                        fake = gen(x.to(DEVICE[0]))
+                        x, real = d['bw'].to(DEVICE), d['rgb']
+                        fake = gen(x)
                         x = x*0.5 + 0.5
                         real = real*0.5 + 0.5
                         fake = fake*0.5 + 0.5

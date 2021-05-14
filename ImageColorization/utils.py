@@ -22,15 +22,16 @@ def weight_reset(m):
     except:
         pass
 class GANLoss(nn.Module):
-    def __init__(self, label_smoothing: float = 1.0):
+    def __init__(self, label_smoothing: float = 1.0, device='cpu'):
         super(GANLoss, self).__init__()
         self.label_smoothing = label_smoothing
         self.criterion = nn.BCEWithLogitsLoss()
+        self.device = device
     def forward(self, inp, real: bool):
         if real:
-            label = torch.full(inp.size(), self.label_smoothing, requires_grad=True)
+            label = torch.full(inp.size(), self.label_smoothing, requires_grad=True).to(self.device)
         else:
-            label = torch.full(inp.size(), 1 - self.label_smoothing, requires_grad=True)
+            label = torch.full(inp.size(), 1 - self.label_smoothing, requires_grad=True).to(self.device)
         return self.criterion(inp, label)
     
     
