@@ -5,5 +5,7 @@ ImageColorization/P1/summary_writers/*
 ImageColorization/P1/state_dicts/*
 ImageColorization/P4/summary_writers/*
 ImageColorization/P4/state_dicts/*
+ImageColorization/P4/source_images_coco/*
+ImageColorization/P4/target_images_coco/*
 .ipynb_checkpoints
 checkpoint

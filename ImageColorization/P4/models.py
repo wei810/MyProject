@@ -102,19 +102,19 @@ class UnetEncoder(nn.Module):
             self.activ(),
         )
         self.layer1 = self.__make_layer(block, inplane_base, layers[0])
-        self.bottle1 = conv1x1(inplane_base*layers[0], inplane_base)
+        self.bottle1 = conv1x1(inplane_base, inplane_base)
         self.down1 = block(inplane_base, inplane_base*2, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
         
         self.layer2 = self.__make_layer(block, inplane_base*2, layers[1])
-        self.bottle2 = conv1x1(inplane_base*2*layers[1], inplane_base*2)
+        self.bottle2 = conv1x1(inplane_base*2, inplane_base*2)
         self.down2 = block(inplane_base*2, inplane_base*4, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
         
         self.layer3 = self.__make_layer(block, inplane_base*4, layers[2])
-        self.bottle3 = conv1x1(inplane_base*4*layers[2], inplane_base*4)
+        self.bottle3 = conv1x1(inplane_base*4, inplane_base*4)
         self.down3 = block(inplane_base*4, inplane_base*4, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
         
         self.layer4 = self.__make_layer(block, inplane_base*4, layers[3])
-        self.bottle4 = conv1x1(inplane_base*4*layers[3], inplane_base*4)
+        self.bottle4 = conv1x1(inplane_base*4, inplane_base*4)
         self.down4 = block(inplane_base*4, inplane_base*4, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate)
     def __make_layer(
         self,
@@ -205,22 +205,22 @@ class UnetDecoder(nn.Module):
         
         self.up1 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate, scale=1, scale_factor=1)
         self.layer1 = self.__make_layer(block, inplane_base*4, layers[0])
-        self.bottle1 = conv1x1(inplane_base*4*layers[0], inplane_base*4)
+        self.bottle1 = conv1x1(inplane_base*4, inplane_base*4)
         self.fusion1 = Fusion(inplane_base*4, inplane_base*4, norm_layer, activation_function)
         
         self.up2 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate, scale=1)
         self.layer2 = self.__make_layer(block, inplane_base*4, layers[1])
-        self.bottle2 = conv1x1(inplane_base*4*layers[1], inplane_base*4)
+        self.bottle2 = conv1x1(inplane_base*4, inplane_base*4)
         self.fusion2 = Fusion(inplane_base*4, inplane_base*4, norm_layer, activation_function)
         
         self.up3 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate)
         self.layer3 = self.__make_layer(block, inplane_base*2, layers[2])
-        self.bottle3 = conv1x1(inplane_base*2*layers[2], inplane_base*2)
+        self.bottle3 = conv1x1(inplane_base*2, inplane_base*2)
         self.fusion3 = Fusion(inplane_base*2, inplane_base*2, norm_layer, activation_function)
 
         self.up4 = self.__make_upsample_block(block, 2, inplane_base, dropout_rate)
         self.layer4 = self.__make_layer(block, inplane_base, layers[3])
-        self.bottle4 = conv1x1(inplane_base*layers[3], inplane_base)
+        self.bottle4 = conv1x1(inplane_base, inplane_base)
         self.fusion4 = Fusion(inplane_base, inplane_base, norm_layer, activation_function)
         
         self.merged_block = nn.ModuleDict({
