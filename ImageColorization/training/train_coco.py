@@ -50,7 +50,7 @@ def main():
     print('GENERATOR ARCHITECTURE')
     summary(gen)
     gen.to(DEVICE)
-    critic = PatchCritic(ResidualLayer, [1, 1, 1, 1], custom_leaky_relu(rate=0.3), nn.BatchNorm2d)
+    critic = PatchCritic(ResidualLayer, [1, 1, 1, 1], nn.ReLU, nn.BatchNorm2d)
     print('CRITIC ARCHITECTURE')
     summary(critic)
     critic.to(DEVICE)
@@ -64,7 +64,7 @@ def main():
     valDL = DataLoader(valDS, batch_size=BATCH_SIZE)
     criterionL1 = nn.L1Loss()
     criterionMSE = nn.MSELoss()
-    criterionGAN = GANLoss(label_smoothing=0.95, device=DEVICE)
+    criterionGAN = GANLoss(label_smoothing=1., device=DEVICE)
     logging_freq = 30
     def train_step(engine, batch):
         gen.train()

@@ -16,6 +16,7 @@ def conv3x3(inplanes: int, planes: int, stride: int, padding: int = 1):
 class ResidualBasicBlock(nn.Module):
     def __init__(
         self,
+        kernel_size: int,
         inplanes: int,
         planes: int,
         stride: int,
@@ -25,68 +26,35 @@ class ResidualBasicBlock(nn.Module):
     ):
         super(ResidualBasicBlock, self).__init__()
         self.stride = stride
-        self.conv1 = conv3x3(inplanes, inplanes, stride)
-        self.norm1 = norm_layer(inplanes)
-        self.conv2 = conv1x1(inplanes, planes)
-        self.norm2 = norm_layer(planes)
-        self.conv3 = conv1x1(inplanes + planes, planes)
-        self.norm3 = norm_layer(planes)
+        self.process = nn.Sequential(
+            nn.Conv2d(inplanes, planes, kernel_size, padding=(kernel_size - 1)//2, stride=1, bias=False),
+            conv3x3(planes, planes, 1),
+            norm_layer(planes),
+            activation_function(),
+        )   
+        self.merge = nn.Sequential(
+            conv1x1(inplanes + planes, planes),
+            norm_layer(planes)
+        )
         if dropout_rate is None:
-            self.dropout = None
+            self.dropout = nn.Identity()
         else:
             self.dropout = nn.Dropout2d(dropout_rate)
-            self.output_conv = nn.Conv2d(planes, planes, 3, padding=1)
-            self.output_norm = norm_layer(planes)
-        if stride > 1:
-            self.avg_pool = nn.AvgPool2d(stride)
-        self.activ = activation_function()
+        self.downscale = nn.Sequential(
+            nn.Conv2d(planes, planes, kernel_size, padding=(kernel_size - 1)//2, stride=stride, bias=False),
+            norm_layer(planes),
+            activation_function(),
+        )
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.activ(self.norm1(self.conv1(x)))
-        out = self.norm2(self.conv2(out))
-        if self.stride > 1:
-            x = self.avg_pool(x)
-        out = self.norm3(self.conv3(torch.cat([x, out], dim=1)))
-        if self.dropout is not None:
-            out = self.dropout(out)
-            out = self.output_conv(out)
-            out = self.output_norm(out)
-        out = self.activ(out)
-        return out
-class BasicBlock(nn.Module):
-    def __init__(
-        self,
-        inplanes: int,
-        planes: int,
-        stride: int,
-        activation_function: Callable[..., nn.Module],
-        norm_layer: Callable[..., nn.Module],
-        dropout_rate: Union[None, float] = None,
-    ):
-        super(BasicBlock, self).__init__()
-        self.conv1 = conv3x3(inplanes, inplanes, stride)
-        self.norm1 = norm_layer(inplanes)
-        self.conv2 = conv1x1(inplanes, planes)
-        self.norm2 = norm_layer(planes)
-        self.conv3 = conv1x1(planes, planes)
-        self.norm3 = norm_layer(planes)
-        if dropout_rate is None:
-            self.dropout = None
-        else:
-            self.dropout = nn.Dropout2d(dropout_rate)
-            self.output_conv = nn.Conv2d(planes, planes, 3, padding=1, bias=True)
-        self.activ = activation_function()
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.activ(self.norm1(self.conv1(x)))
-        out = self.activ(self.norm2(self.conv2(out)))
-        out = self.activ(self.norm3(self.conv3(out)))
-        if self.dropout is not None:
-            out = self.dropout(out)
-            out = self.output_conv(out)
+        out = self.process(x)
+        out = self.merge(torch.cat([x, out], dim=1))
+        out = self.dropout(out)
+        out = self.downscale(out)
         return out
 class UnetEncoder(nn.Module):
     def __init__(
         self,
-        block: Union[ResidualBasicBlock, BasicBlock],
+        block: Union[ResidualBasicBlock],
         layers: List[int],
         norm_layer: Callable[..., nn.Module],
         activation_function: Callable[..., nn.Module],
@@ -97,34 +65,36 @@ class UnetEncoder(nn.Module):
         self.activ = activation_function
         self.norm_layer = norm_layer
         self.block = nn.Sequential(
-            nn.Conv2d(3, inplane_base, 3, stride=2, padding=1),
+            nn.Conv2d(3, inplane_base, 7, stride=1, padding=3),
             norm_layer(inplane_base),
             self.activ(),
         )
-        self.layer1 = self.__make_layer(block, inplane_base, layers[0])
-        self.bottle1 = conv1x1(inplane_base*layers[0], inplane_base)
-        self.down1 = block(inplane_base, inplane_base*2, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
+        self.layer1 = self.__make_layer(block, 5, inplane_base, layers[0], dropout_rate=dropout_rate)
+        self.bottle1 = conv1x1(inplane_base, inplane_base)
+        self.down1 = block(5, inplane_base, inplane_base*2, 2, self.activ, self.norm_layer)
         
-        self.layer2 = self.__make_layer(block, inplane_base*2, layers[1])
-        self.bottle2 = conv1x1(inplane_base*2*layers[1], inplane_base*2)
-        self.down2 = block(inplane_base*2, inplane_base*4, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
+        self.layer2 = self.__make_layer(block, 3, inplane_base*2, layers[1], dropout_rate=dropout_rate)
+        self.bottle2 = conv1x1(inplane_base*2, inplane_base*2)
+        self.down2 = block(3, inplane_base*2, inplane_base*4, 2, self.activ, self.norm_layer)
         
-        self.layer3 = self.__make_layer(block, inplane_base*4, layers[2])
-        self.bottle3 = conv1x1(inplane_base*4*layers[2], inplane_base*4)
-        self.down3 = block(inplane_base*4, inplane_base*4, 2, self.activ, self.norm_layer, dropout_rate=dropout_rate)
+        self.layer3 = self.__make_layer(block, 3, inplane_base*4, layers[2], dropout_rate=dropout_rate)
+        self.bottle3 = conv1x1(inplane_base*4, inplane_base*4)
+        self.down3 = block(3, inplane_base*4, inplane_base*8, 2, self.activ, self.norm_layer)
         
-        self.layer4 = self.__make_layer(block, inplane_base*4, layers[3])
-        self.bottle4 = conv1x1(inplane_base*4*layers[3], inplane_base*4)
-        self.down4 = block(inplane_base*4, inplane_base*4, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate)
+        self.layer4 = self.__make_layer(block, 3, inplane_base*8, layers[3], dropout_rate=dropout_rate)
+        self.bottle4 = conv1x1(inplane_base*8, inplane_base*8)
+        self.down4 = block(3, inplane_base*8, inplane_base*8, 2, self.activ, self.norm_layer)
     def __make_layer(
         self,
-        block: Union[ResidualBasicBlock, BasicBlock],
+        block: Union[ResidualBasicBlock],
+        kernel_size: int,
         planes: int,
         blocks: int,
+        dropout_rate: Union[None, float] = None,
     ):
         layers = []
         for i in range(blocks):
-            layers.append(block(planes, planes, 1, self.activ, self.norm_layer))
+            layers.append(block(kernel_size, planes, planes, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate))
         return nn.ModuleList(layers)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         outs = {'x': x}
@@ -150,11 +120,10 @@ class UnetEncoder(nn.Module):
         
         return outs
     def __merge(self, x: torch.Tensor, layers: nn.ModuleList, bottle: nn.Module):
-        outs = []
+        out = 0.
         for l in layers:
             x = l(x)
-            outs.append(x)
-        out = torch.cat(outs, dim=1)
+            out = out + x
         out = bottle(out)
         return out
 class Fusion(nn.Module):
@@ -164,85 +133,64 @@ class Fusion(nn.Module):
         planes: int,
         norm_layer: Callable[..., nn.Module],
         activation_function: Callable[..., nn.Module],
-        noise_params={'mean': 0., 'stddev': 0.15}
     ):
         super(Fusion, self).__init__()
         self.inplanes = inplanes
         self.planes = planes
-        self.noise_params = noise_params
         self.norm_x = norm_layer(inplanes)
         self.norm_y = norm_layer(inplanes)
-        self.noise_conv = conv3x3(1, inplanes, 1)
-        self.noise_norm = norm_layer(inplanes)
         self.bottle = conv1x1(inplanes, planes)
         self.activ = activation_function()
         self.apply_noise = False
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         a = x[:, :self.inplanes, ...]
         b = x[:, self.inplanes:, ...]
-        size = list(a.size())
-        size[1] = 1
-        noise = torch.normal(self.noise_params['mean'], self.noise_params['stddev'], size).to(x.device)
         out = self.norm_x(a) + self.norm_y(b)
-        if self.training:
-            out = out + self.noise_norm(self.noise_conv(noise))
-        elif self.apply_noise:
-            out = out + self.noise_norm(self.noise_conv(noise))
         out = self.bottle(out)
         out = self.activ(out)
         return out
 class UnetDecoder(nn.Module):
     def __init__(
         self,
-        block: Union[ResidualBasicBlock, BasicBlock],
+        block: Union[ResidualBasicBlock],
         layers: List[int],
         norm_layer: Callable[..., nn.Module],
         activation_function: Callable[..., nn.Module],
         inplane_base: Optional[int] = 64,
         dropout_rate: Optional[Union[None, float]] = 0.15,
-        x_inference_blocks: Optional[int] = 4,
     ):
         super(UnetDecoder, self).__init__()
         self.activ = activation_function
         self.norm_layer = norm_layer
         
-        self.up1 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate, scale=1, scale_factor=1)
-        self.layer1 = self.__make_layer(block, inplane_base*4, layers[0])
-        self.bottle1 = conv1x1(inplane_base*4*layers[0], inplane_base*4)
-        self.fusion1 = Fusion(inplane_base*4, inplane_base*4, norm_layer, activation_function)
+        self.up1 = self.__make_upsample_block(block, 8, inplane_base, scale=1)
+        self.layer1 = self.__make_layer(block, 3, inplane_base*8, layers[0])
+        self.bottle1 = conv1x1(inplane_base*8, inplane_base*8)
+        self.fusion1 = Fusion(inplane_base*8, inplane_base*8, norm_layer, activation_function)
         
-        self.up2 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate, scale=1)
-        self.layer2 = self.__make_layer(block, inplane_base*4, layers[1])
-        self.bottle2 = conv1x1(inplane_base*4*layers[1], inplane_base*4)
+        self.up2 = self.__make_upsample_block(block, 8, inplane_base)
+        self.layer2 = self.__make_layer(block, 3, inplane_base*4, layers[1])
+        self.bottle2 = conv1x1(inplane_base*4, inplane_base*4)
         self.fusion2 = Fusion(inplane_base*4, inplane_base*4, norm_layer, activation_function)
         
-        self.up3 = self.__make_upsample_block(block, 4, inplane_base, dropout_rate)
-        self.layer3 = self.__make_layer(block, inplane_base*2, layers[2])
-        self.bottle3 = conv1x1(inplane_base*2*layers[2], inplane_base*2)
+        self.up3 = self.__make_upsample_block(block, 4, inplane_base)
+        self.layer3 = self.__make_layer(block, 3, inplane_base*2, layers[2])
+        self.bottle3 = conv1x1(inplane_base*2, inplane_base*2)
         self.fusion3 = Fusion(inplane_base*2, inplane_base*2, norm_layer, activation_function)
 
-        self.up4 = self.__make_upsample_block(block, 2, inplane_base, dropout_rate)
-        self.layer4 = self.__make_layer(block, inplane_base, layers[3])
-        self.bottle4 = conv1x1(inplane_base*layers[3], inplane_base)
+        self.up4 = self.__make_upsample_block(block, 2, inplane_base)
+        self.layer4 = self.__make_layer(block, 5, inplane_base, layers[3])
+        self.bottle4 = conv1x1(inplane_base, inplane_base)
         self.fusion4 = Fusion(inplane_base, inplane_base, norm_layer, activation_function)
         
         self.merged_block = nn.ModuleDict({
-            'conv': nn.Sequential(
-                nn.Conv2d(3, inplane_base, 3, stride=1, padding=1),
-                norm_layer(inplane_base),
-                activation_function(),
-            ),
-            'deep_layer': self.__make_layer(block, inplane_base, x_inference_blocks),
-            'deep_layer_norm': norm_layer(inplane_base),
-            'unet_layer': self.__make_upsample_block(block, 1, inplane_base, None, scale=1),
-            'unet_layer_norm': norm_layer(inplane_base),
-            'bottle': conv1x1(inplane_base*2, inplane_base),
-            'merged_layer': block(inplane_base, inplane_base//4, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate),
+            'unet_layer': block(3, inplane_base, inplane_base, 1, self.activ, self.norm_layer),
+            'merged_layer': block(3, inplane_base, inplane_base, 1, self.activ, self.norm_layer),
         })
         
         self.output_block = nn.Sequential(
-            conv3x3(inplane_base//4, inplane_base//4, 1, 1),
-            conv1x1(inplane_base//4, 3),
+            conv1x1(inplane_base, inplane_base),
+            conv1x1(inplane_base, 3),
             nn.Tanh(),
         )
     def forward(self, inp) -> torch.Tensor:
@@ -260,23 +208,15 @@ class UnetDecoder(nn.Module):
         down_output = self.__merge(self.up4(out), self.layer4, self.bottle4)
         out = self.fusion4(torch.cat([block, down_output], dim=1))
         
-        x_ = self.merged_block['conv'](x)
-        b_ = self.merged_block['deep_layer_norm'](self.__feed_forward(x_, self.merged_block['deep_layer']))
-        f_ = self.merged_block['unet_layer_norm'](self.merged_block['unet_layer'](out))
-        inp = self.merged_block['bottle'](torch.cat([b_, f_], dim=1))
-        out = self.merged_block['merged_layer'](inp)
+        out = self.merged_block['unet_layer'](out)
+        out = self.merged_block['merged_layer'](out)
         out = self.output_block(out)
         return out
-    def __feed_forward(self, x: torch.Tensor, layers: nn.ModuleList):
-        for l in layers:
-            x = l(x)
-        return x
     def __merge(self, x: torch.Tensor, layers: nn.ModuleList, bottle: nn.Module):
-        outs = []
+        out = 0.
         for l in layers:
             x = l(x)
-            outs.append(x)
-        out = torch.cat(outs, dim=1)
+            out = out + x
         out = bottle(out)
         return out
     def __make_upsample_block(
@@ -284,29 +224,31 @@ class UnetDecoder(nn.Module):
         block,
         f: int,
         inplane_base: int,
-        dropout_rate: Union[None, float],
+        dropout_rate: Union[None, float] = None,
         scale: int = 2,
         scale_factor: int = 2,
     ):
         inplanes = f*inplane_base
         if scale_factor > 1:
             return nn.Sequential(
-                block(inplanes, inplanes//scale, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate),
+                block(3, inplanes, inplanes//scale, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate),
                 nn.Upsample(scale_factor=scale_factor),
             )
         else:
             return nn.Sequential(
-                block(inplanes, inplanes//scale, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate),
+                block(3, inplanes, inplanes//scale, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate),
             )
     def __make_layer(
         self,
-        block: Union[ResidualBasicBlock, BasicBlock],
+        block: Union[ResidualBasicBlock],
+        kernel_size: int,
         planes: int,
         blocks: int,
+        dropout_rate: Union[None, float] = None,
     ):
         layers = []
         for i in range(blocks):
-            layers.append(block(planes, planes, 1, self.activ, self.norm_layer))
+            layers.append(block(kernel_size, planes, planes, 1, self.activ, self.norm_layer, dropout_rate=dropout_rate))
         return nn.ModuleList(layers)
 def custom_leaky_relu(rate: float = 0.):
     return partial(nn.LeakyReLU, negative_slope=rate)
@@ -321,17 +263,16 @@ class Unet(nn.Module):
         
         self.args = {
             'inplane_base': 64,
-            'encoder_block': BasicBlock,
-            'encoder_layers': [8, 4, 2, 1],
+            'encoder_block': ResidualBasicBlock,
+            'encoder_layers': [4, 3, 2, 1],
             'encoder_norm_layer': nn.BatchNorm2d,
-            'encoder_activation_function': custom_leaky_relu(rate=0.15),
+            'encoder_activation_function': nn.ReLU,
             'encoder_dropout_rate': 0.15, 
-            'decoder_block': BasicBlock,
-            'decoder_layers': [1, 2, 4, 8],
+            'decoder_block': ResidualBasicBlock,
+            'decoder_layers': [1, 2, 3, 4],
             'decoder_norm_layer': nn.BatchNorm2d,
-            'decoder_activation_function': custom_leaky_relu(rate=0.15),
+            'decoder_activation_function': nn.ReLU,
             'decoder_dropout_rate': 0.15, 
-            'decoder_x_inference_blocks': 8, 
         }
         self.args.update(kwargs)
         self.encoder = encoder(
@@ -349,7 +290,6 @@ class Unet(nn.Module):
             self.args['decoder_activation_function'],
             inplane_base=self.args['inplane_base'],
             dropout_rate=self.args['decoder_dropout_rate'],
-            x_inference_blocks=self.args['decoder_x_inference_blocks']
         )
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.encoder(x)
@@ -358,6 +298,7 @@ class Unet(nn.Module):
 class ResidualLayer(nn.Module):
     def __init__(
         self,
+        kernel_size: int,
         planes: int,
         depth: int,
         norm_layer: Callable[..., nn.Module],
@@ -368,9 +309,10 @@ class ResidualLayer(nn.Module):
         self.activ = activation_function
         self.norm_layer = norm_layer
         self.dropout_rate = dropout_rate
-        self.__make_layer(planes, depth)
+        self.__make_layer(kernel_size, planes, depth)
     def __make_layer(
         self,
+        kernel_size: int,
         planes: int,
         depth: int,
     ):
@@ -378,6 +320,7 @@ class ResidualLayer(nn.Module):
         for i in range(depth):
             self.inner_layers.append(
                 ResidualBasicBlock(
+                    kernel_size,
                     planes, 
                     planes,
                     1,
@@ -400,7 +343,7 @@ class PatchCritic(nn.Module):
         norm_layer: nn.BatchNorm2d,
         inplane_base: Optional[int] = 8, 
         out_inplanes: Optional[int] = 1, 
-        dropout_rate: Optional[Union[None, float]] = 0.3,
+        dropout_rate: Optional[Union[None, float]] = 0.15,
         noise_params={'mean': 0., 'stddev': 0.15},
     ):
         super(PatchCritic, self).__init__()
@@ -408,40 +351,40 @@ class PatchCritic(nn.Module):
         self.norm_layer = norm_layer
         self.noise_params = noise_params
         self.block = nn.Sequential(
-            nn.Conv2d(6, inplane_base, 3, stride=2, padding=1),
+            nn.Conv2d(6, inplane_base, 7, stride=2, padding=3),
             norm_layer(inplane_base),
             self.activ(),
         )
         
-        self.layer1 = layer_block(inplane_base, layer_depth[0], norm_layer, activation_function, dropout_rate)
+        self.layer1 = layer_block(5, inplane_base, layer_depth[0], norm_layer, activation_function, dropout_rate)
         self.down1 = nn.Sequential(
-            nn.Conv2d(inplane_base, inplane_base*2, 5, stride=2, padding=2),
+            nn.Conv2d(inplane_base, inplane_base*2, 5, stride=2, padding=2, bias=False),
             norm_layer(inplane_base*2),
             self.activ(),
         )
         
-        self.layer2 = layer_block(inplane_base*2, layer_depth[1], norm_layer, activation_function, dropout_rate)
+        self.layer2 = layer_block(5, inplane_base*2, layer_depth[1], norm_layer, activation_function, dropout_rate)
         self.down2 = nn.Sequential(
-            nn.Conv2d(inplane_base*2, inplane_base*4, 5, stride=2, padding=2),
+            nn.Conv2d(inplane_base*2, inplane_base*4, 5, stride=2, padding=2, bias=False),
             norm_layer(inplane_base*4),
             self.activ(),
         )
         
-        self.layer3 = layer_block(inplane_base*4, layer_depth[2], norm_layer, activation_function, dropout_rate)
+        self.layer3 = layer_block(3, inplane_base*4, layer_depth[2], norm_layer, activation_function, dropout_rate)
         self.down3 = nn.Sequential(
-            nn.Conv2d(inplane_base*4, inplane_base*8, 3, stride=2, padding=1),
+            nn.Conv2d(inplane_base*4, inplane_base*8, 3, stride=2, padding=1, bias=False),
             norm_layer(inplane_base*8),
             self.activ(),
         )
         
-        self.layer4 = layer_block(inplane_base*8, layer_depth[3], norm_layer, activation_function, dropout_rate)
+        self.layer4 = layer_block(3, inplane_base*8, layer_depth[3], norm_layer, activation_function, dropout_rate)
         self.down4 = nn.Sequential(
-            nn.Conv2d(inplane_base*8, inplane_base*16, 3, stride=2, padding=1),
-            norm_layer(inplane_base*16),
-            nn.Conv2d(inplane_base*16, inplane_base*16, 3, stride=1, padding=1),
+            nn.Conv2d(inplane_base*8, inplane_base*8, 3, stride=2, padding=1, bias=False),
+            norm_layer(inplane_base*8),
+            conv3x3(inplane_base*8, inplane_base*8, 1),
         )
         
-        self.squeeze = conv1x1(inplane_base*16, out_inplanes)
+        self.squeeze = conv1x1(inplane_base*8, out_inplanes)
         self.layers = {
             'block': self.block,
             'layer1': self.layer1,
